@@ -8,15 +8,16 @@ app = Flask(__name__)
 
 @app.route("/upload", methods=["POST"])
 def upload():
-    # ✅ تحقق من وجود ملفات في الطلب
+    # البحث عن أي مفتاح يحتوي على "dex"
     if not request.files:
-        return f"No files uploaded at all. Received: {request.files}", 400
+        return f"No files uploaded at all. Received keys: {list(request.files.keys())}", 400
 
-    # ✅ تحقق من وجود حقل dex تحديداً
-    if 'dex' not in request.files:
-        return f"'dex' field not found. Found fields: {list(request.files.keys())}", 400
+    matching_keys = [key for key in request.files.keys() if "dex" in key.lower()]
+    if not matching_keys:
+        return f"'dex' field not found. Found keys: {list(request.files.keys())}", 400
 
-    dex_file = request.files['dex']
+    dex_file = request.files[matching_keys[0]]
+
     job_id = str(uuid.uuid4())
     job_dir = f"/tmp/dexjob_{job_id}"
     os.makedirs(job_dir, exist_ok=True)
@@ -26,7 +27,6 @@ def upload():
     dex_file.save(dex_path)
 
     try:
-        # ✅ نفذ عملية التفكيك باستخدام baksmali
         subprocess.check_call([
             "java", "-jar", "baksmali.jar", "d", dex_path, "-o", out_dir
         ])
