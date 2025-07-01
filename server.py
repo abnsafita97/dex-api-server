@@ -3,33 +3,47 @@ import os
 import shutil
 import subprocess
 import uuid
+import zipfile
 
 app = Flask(__name__)
-
 UPLOAD_DIR = "/tmp"
 
 @app.route("/upload", methods=["POST"])
-def upload_dex():
-    if 'dex' not in request.files:
-        return "'dex' field not found. Found: " + str(list(request.files.keys())), 400
+def upload_apk():
+    if 'apk' not in request.files:
+        return "'apk' field not found. Found: " + str(list(request.files.keys())), 400
 
-    dex_file = request.files['dex']
+    apk_file = request.files['apk']
     job_id = str(uuid.uuid4())
-    job_dir = os.path.join(UPLOAD_DIR, f"dexjob_{job_id}")
+    job_dir = os.path.join(UPLOAD_DIR, f"apkjob_{job_id}")
     os.makedirs(job_dir, exist_ok=True)
 
+    apk_path = os.path.join(job_dir, "input.apk")
     dex_path = os.path.join(job_dir, "classes.dex")
     out_dir = os.path.join(job_dir, "smali_out")
-    dex_file.save(dex_path)
 
     try:
+        # حفظ ملف الـ APK
+        apk_file.save(apk_path)
+
+        # استخراج classes.dex من داخل ملف الـ APK
+        with zipfile.ZipFile(apk_path, 'r') as zip_ref:
+            if "classes.dex" not in zip_ref.namelist():
+                return "APK does not contain classes.dex", 400
+            zip_ref.extract("classes.dex", path=job_dir)
+
+        # تفكيك ملف dex باستخدام baksmali
         subprocess.check_call([
             "java", "-jar", "baksmali.jar", "d", dex_path, "-o", out_dir
         ])
+
+        # ضغط smali_out إلى ملف ZIP
         zip_path = shutil.make_archive(out_dir, "zip", out_dir)
         return send_file(zip_path, as_attachment=True)
+
     except Exception as e:
-        return f"Error during decompilation: {str(e)}", 500
+        return f"Error during APK processing: {str(e)}", 500
+
     finally:
         shutil.rmtree(job_dir, ignore_errors=True)
 
