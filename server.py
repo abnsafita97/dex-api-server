@@ -6,20 +6,16 @@ import uuid
 
 app = Flask(__name__)
 
+UPLOAD_DIR = "/tmp"
+
 @app.route("/upload", methods=["POST"])
-def upload():
-    # البحث عن أي مفتاح يحتوي على "dex"
-    if not request.files:
-        return f"No files uploaded at all. Received keys: {list(request.files.keys())}", 400
+def upload_dex():
+    if 'dex' not in request.files:
+        return "'dex' field not found. Found: " + str(list(request.files.keys())), 400
 
-    matching_keys = [key for key in request.files.keys() if "dex" in key.lower()]
-    if not matching_keys:
-        return f"'dex' field not found. Found keys: {list(request.files.keys())}", 400
-
-    dex_file = request.files[matching_keys[0]]
-
+    dex_file = request.files['dex']
     job_id = str(uuid.uuid4())
-    job_dir = f"/tmp/dexjob_{job_id}"
+    job_dir = os.path.join(UPLOAD_DIR, f"dexjob_{job_id}")
     os.makedirs(job_dir, exist_ok=True)
 
     dex_path = os.path.join(job_dir, "classes.dex")
@@ -30,10 +26,38 @@ def upload():
         subprocess.check_call([
             "java", "-jar", "baksmali.jar", "d", dex_path, "-o", out_dir
         ])
-        shutil.make_archive(out_dir, "zip", out_dir)
-        return send_file(out_dir + ".zip", as_attachment=True)
+        zip_path = shutil.make_archive(out_dir, "zip", out_dir)
+        return send_file(zip_path, as_attachment=True)
     except Exception as e:
-        return f"Error during processing: {str(e)}", 500
+        return f"Error during decompilation: {str(e)}", 500
+    finally:
+        shutil.rmtree(job_dir, ignore_errors=True)
+
+@app.route("/assemble", methods=["POST"])
+def assemble_smali():
+    if 'smali' not in request.files:
+        return "'smali' field not found. Found: " + str(list(request.files.keys())), 400
+
+    smali_zip = request.files['smali']
+    job_id = str(uuid.uuid4())
+    job_dir = os.path.join(UPLOAD_DIR, f"assemblejob_{job_id}")
+    os.makedirs(job_dir, exist_ok=True)
+
+    zip_path = os.path.join(job_dir, "smali.zip")
+    smali_zip.save(zip_path)
+
+    smali_out = os.path.join(job_dir, "smali")
+    os.makedirs(smali_out, exist_ok=True)
+
+    try:
+        shutil.unpack_archive(zip_path, smali_out)
+        dex_output = os.path.join(job_dir, "classes.dex")
+        subprocess.check_call([
+            "java", "-jar", "smali.jar", "a", smali_out, "-o", dex_output
+        ])
+        return send_file(dex_output, as_attachment=True)
+    except Exception as e:
+        return f"Error during assembly: {str(e)}", 500
     finally:
         shutil.rmtree(job_dir, ignore_errors=True)
 
