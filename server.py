@@ -4,6 +4,10 @@ import os, shutil, subprocess, uuid, zipfile
 app = Flask(__name__)
 UPLOAD_DIR = "/tmp"
 
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+BAKSMALI_PATH = os.path.join(BASE_DIR, "baksmali.jar")
+SMALI_PATH = os.path.join(BASE_DIR, "smali.jar")
+
 @app.route("/upload", methods=["POST"])
 def upload_apk():
     print("Received fields:", list(request.files.keys()))
@@ -27,11 +31,11 @@ def upload_apk():
                 return "APK does not contain classes.dex", 400
             zip_ref.extract("classes.dex", path=job_dir)
 
-        if not os.path.exists("baksmali.jar"):
+        if not os.path.exists(BAKSMALI_PATH):
             return "Missing baksmali.jar", 500
 
         subprocess.check_call([
-            "java", "-jar", "baksmali.jar", "d", dex_path, "-o", out_dir
+            "java", "-jar", BAKSMALI_PATH, "d", dex_path, "-o", out_dir
         ])
 
         zip_path = shutil.make_archive(out_dir, "zip", out_dir)
@@ -63,17 +67,25 @@ def assemble_smali():
         shutil.unpack_archive(zip_path, smali_out)
         dex_output = os.path.join(job_dir, "classes.dex")
 
-        if not os.path.exists("smali.jar"):
+        if not os.path.exists(SMALI_PATH):
             return "Missing smali.jar", 500
 
         subprocess.check_call([
-            "java", "-jar", "smali.jar", "a", smali_out, "-o", dex_output
+            "java", "-jar", SMALI_PATH, "a", smali_out, "-o", dex_output
         ])
         return send_file(dex_output, as_attachment=True)
     except Exception as e:
         return f"Error during assembly: {str(e)}", 500
     finally:
         shutil.rmtree(job_dir, ignore_errors=True)
+
+@app.route("/health", methods=["GET"])
+def health_check():
+    return {
+        "java": shutil.which("java") is not None,
+        "baksmali": os.path.exists(BAKSMALI_PATH),
+        "smali": os.path.exists(SMALI_PATH),
+    }, 200
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
