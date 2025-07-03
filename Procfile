@@ -1,1 +1,0 @@
-web: python -c "import os; port = os.getenv('PORT', '8080'); os.system(f'gunicorn --bind 0.0.0.0:{port} --timeout 600 --workers 1 --worker-class sync --access-logfile - --error-logfile - server:app')"
