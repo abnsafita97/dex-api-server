@@ -1,29 +1,22 @@
-FROM python:3.9-slim-bullseye
+# Use an official Python image
+FROM python:3.11-slim
 
-# تثبيت تبعيات النظام
-RUN apt-get update && apt-get install -y \
-    openjdk-17-jre-headless \
-    wget \
-    && rm -rf /var/lib/apt/lists/*
-
-# تعيين متغيرات البيئة
-ENV PORT=8080
-ENV JAVA_OPTS="-Xms512m -Xmx1024m"
-
-# إعداد بيئة العمل
+# Set working directory
 WORKDIR /app
-COPY . .
 
-# تثبيت تبعيات بايثون
+# Install dependencies
+COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# نقل الملفات التنفيذية وإعداد الأذونات
-RUN chmod +x baksmali.jar smali.jar && \
-    mv baksmali.jar /usr/local/bin/ && \
-    mv smali.jar /usr/local/bin/
+# Copy the rest of the application
+COPY . .
 
-# تهيئة مجلد التحميلات
-RUN mkdir -p /tmp && chmod 777 /tmp
+# Copy baksmali and smali jars to a known location
+COPY baksmali.jar /usr/local/bin/baksmali.jar
+COPY smali.jar /usr/local/bin/smali.jar
 
-# الأمر التشغيلي مع إعدادات متقدمة
-CMD ["sh", "-c", "gunicorn --bind 0.0.0.0:${PORT:-8080} --timeout 600 --workers 2 --limit-request-line 0 --limit-request-field_size 0 --access-logfile - --error-logfile - server:app"]
+# Expose the port
+EXPOSE 8080
+
+# Use gunicorn to run the Flask app
+CMD ["gunicorn", "--bind", "0.0.0.0:8080", "server:app"]
