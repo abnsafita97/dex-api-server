@@ -38,4 +38,4 @@ RUN mkdir -p /tmp && chmod 777 /tmp
 EXPOSE 8080
 
 # تشغيل التطبيق باستخدام gunicorn مع إعدادات المهلة والأداء
-CMD ["gunicorn", "--bind", "0.0.0.0:8080", "--timeout", "600", "--workers", "1", "--worker-class", "sync", "--access-logfile", "-", "--error-logfile", "-", "server:app"]
+CMD ["sh", "-c", "gunicorn --bind 0.0.0.0:${PORT:-8080} --timeout 600 --workers 1 --worker-class sync --access-logfile - --error-logfile - server:app"]
