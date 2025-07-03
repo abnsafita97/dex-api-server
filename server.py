@@ -6,11 +6,17 @@ import uuid
 import zipfile
 import logging
 import traceback
+from datetime import datetime
 
-# إعداد التسجيل
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+# ===== إعداد نظام التسجيل =====
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[logging.StreamHandler()]
+)
 logger = logging.getLogger(__name__)
 
+# ===== تعريف التطبيق والتهيئة =====
 app = Flask(__name__)
 UPLOAD_DIR = "/tmp"
 MAX_CONTENT_LENGTH = 100 * 1024 * 1024  # 100MB
@@ -20,44 +26,50 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 BAKSMALI_PATH = os.path.join(BASE_DIR, "baksmali.jar")
 SMALI_PATH = os.path.join(BASE_DIR, "smali.jar")
 
-# التحقق من وجود ملفات JAR عند بدء التشغيل
+# ===== تسجيل معلومات البداية =====
 logger.info("Starting server with configuration:")
 logger.info("Base directory: %s", BASE_DIR)
 logger.info("Files in directory: %s", os.listdir(BASE_DIR))
 logger.info("Baksmali path exists: %s", os.path.exists(BAKSMALI_PATH))
 logger.info("Smali path exists: %s", os.path.exists(SMALI_PATH))
 
-# تسجيل الطلبات
+# ===== تسجيل الطلبات والاستجابات =====
 @app.before_request
 def log_request_info():
-    logger.info("Request: %s %s", request.method, request.path)
+    logger.info("Request: %s %s", request.method, request.url)
     logger.info("Headers: %s", dict(request.headers))
     if request.files:
-        logger.info("Files: %s", list(request.files.keys()))
+        logger.info("Files received: %s", list(request.files.keys()))
 
 @app.after_request
 def log_response_info(response):
     logger.info("Response status: %s", response.status)
     return response
 
+# ===== نقطة البداية =====
 @app.route("/")
 def home():
     return "DEX API Server is running!", 200
 
+# ===== رفع وتفكيك APK =====
 @app.route("/upload", methods=["POST"])
 def upload_apk():
-    logger.info("Upload request started")
     try:
+        logger.info("Upload request started")
+        
+        # التحقق من وجود ملف APK
         if 'apk' not in request.files:
             logger.error("Missing 'apk' field")
             return jsonify(error="'apk' field is required"), 400
         
         apk_file = request.files['apk']
         
+        # التحقق من اسم الملف
         if apk_file.filename == '':
             logger.error("No file selected")
             return jsonify(error="No selected file"), 400
         
+        # إنشاء مجلد مؤقت
         job_id = str(uuid.uuid4())
         job_dir = os.path.join(UPLOAD_DIR, f"apkjob_{job_id}")
         os.makedirs(job_dir, exist_ok=True)
@@ -111,13 +123,13 @@ def upload_apk():
                         logger.error("Baksmali failed for %s: %s", dex_path, result.stderr)
                         return jsonify(error=f"DEX disassembly failed: {result.stderr}"), 500
                     
-                    logger.info("Baksmali output: %s", result.stdout[:500])
+                    logger.info("Baksmali completed for %s", dex)
                 
                 except subprocess.TimeoutExpired:
                     logger.error("Baksmali timed out for %s", dex_path)
                     return jsonify(error="DEX disassembly timed out"), 500
             
-            # ضغط النتيجة - الطريقة الصحيحة
+            # ضغط النتيجة
             zip_path = os.path.join(job_dir, "smali_out.zip")
             logger.info("Creating ZIP archive at: %s", zip_path)
             
@@ -131,11 +143,7 @@ def upload_apk():
             
             logger.info("ZIP created successfully, size: %d bytes", os.path.getsize(zip_path))
             
-            # إرسال الملف مع التحقق من وجوده
-            if not os.path.exists(zip_path):
-                logger.error("ZIP file not found after creation!")
-                return jsonify(error="Internal server error: ZIP file missing"), 500
-                
+            # إرسال الملف
             return send_file(
                 zip_path,
                 as_attachment=True,
@@ -156,43 +164,48 @@ def upload_apk():
         logger.error("Unhandled error in upload_apk: %s", traceback.format_exc())
         return jsonify(error="Internal server error"), 500
 
+# ===== تجميع Smali إلى DEX =====
 @app.route("/assemble", methods=["POST"])
 def assemble_smali():
-    logger.info("Assemble request started")
     try:
+        logger.info("Assemble request started")
+        
+        # التحقق من وجود ملف Smali
         if 'smali' not in request.files:
             logger.error("Missing 'smali' field")
             return jsonify(error="'smali' field is required"), 400
         
         smali_zip = request.files['smali']
         
+        # إنشاء مجلد مؤقت
         job_id = str(uuid.uuid4())
         job_dir = os.path.join(UPLOAD_DIR, f"assemblejob_{job_id}")
         os.makedirs(job_dir, exist_ok=True)
         logger.info("Created job directory: %s", job_dir)
         
         try:
+            # حفظ ملف الـ ZIP
             zip_path = os.path.join(job_dir, "smali.zip")
             smali_zip.save(zip_path)
             logger.info("Saved smali ZIP: %s", zip_path)
             
-            smali_out = os.path.join(job_dir, "smali")
-            os.makedirs(smali_out, exist_ok=True)
+            # استخراج ملفات Smali
+            smali_dir = os.path.join(job_dir, "smali")
+            os.makedirs(smali_dir, exist_ok=True)
             
-            # استخراج ملفات smali
             with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-                zip_ref.extractall(smali_out)
-                logger.info("Extracted smali files to: %s", smali_out)
+                zip_ref.extractall(smali_dir)
+                logger.info("Extracted smali files to: %s", smali_dir)
             
             # تجميع ملف DEX
             dex_output = os.path.join(job_dir, "classes.dex")
             logger.info("Assembling DEX to: %s", dex_output)
             
             result = subprocess.run(
-                ["java", "-jar", SMALI_PATH, "a", smali_out, "-o", dex_output],
+                ["java", "-jar", SMALI_PATH, "a", smali_dir, "-o", dex_output],
                 capture_output=True,
                 text=True,
-                timeout=300
+                timeout=300  # 5 دقائق
             )
             
             if result.returncode != 0:
@@ -216,6 +229,7 @@ def assemble_smali():
         logger.error("Unhandled error in assemble_smali: %s", traceback.format_exc())
         return jsonify(error="Internal server error"), 500
 
+# ===== فحص صحة الخادم =====
 @app.route("/health", methods=["GET"])
 def health_check():
     try:
@@ -224,6 +238,7 @@ def health_check():
             "smali": os.path.exists(SMALI_PATH)
         }
         
+        # الحصول على إصدار جافا
         java_version = subprocess.check_output(
             ["java", "-version"],
             stderr=subprocess.STDOUT,
@@ -232,6 +247,7 @@ def health_check():
         
         return jsonify({
             "status": "OK",
+            "server_time": datetime.utcnow().isoformat(),
             "java_version": java_version,
             "jar_files": jar_checks,
             "base_dir_files": os.listdir(BASE_DIR)
@@ -243,7 +259,7 @@ def health_check():
             "traceback": traceback.format_exc()
         }), 500
 
-# استخدم هذا الجزء فقط للتشغيل المحلي
+# ===== نقطة الدخول للتشغيل المحلي =====
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8080))
     logger.info("Starting local development server on port %d", port)
