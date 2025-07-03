@@ -24,4 +24,4 @@ RUN if [ ! -f smali.jar ]; then \
     fi
 
 # الأمر التشغيلي المعدل (بدون تفعيل venv)
-CMD ["gunicorn", "--bind", "0.0.0.0:${PORT}", "--timeout", "300", "--workers", "1", "--access-logfile", "-", "--error-logfile", "-", "server:app"]
+CMD ["gunicorn", "--bind", "0.0.0.0:${PORT}", "--timeout", "400", "--workers", "1", "--access-logfile", "-", "--error-logfile", "-", "server:app"]
