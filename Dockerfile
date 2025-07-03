@@ -1,25 +1,29 @@
-# Use official Python image
+# استخدم صورة Python الرسمية
 FROM python:3.11-slim
 
-# Install Java (OpenJDK 17)
-RUN apt-get update && apt-get install -y openjdk-17-jre && apt-get clean
+# تثبيت Java و unzip (لـ baksmali/smali)
+RUN apt-get update && apt-get install -y \
+    default-jre \
+    unzip \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
 
-# Set working directory
+# تعيين مجلد العمل
 WORKDIR /app
 
-# Install Python dependencies
+# نسخ dependencies وتثبيتها
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy the rest of the application
+# نسخ ملفات التطبيق
 COPY . .
 
-# Copy smali tools
+# نسخ ملفات .jar إلى مسار معروف
 COPY baksmali.jar /usr/local/bin/baksmali.jar
 COPY smali.jar /usr/local/bin/smali.jar
 
-# Expose port
+# كشف البورت الذي يستخدمه Railway
 EXPOSE 8080
 
-# Run the app with gunicorn
+# تشغيل التطبيق باستخدام gunicorn
 CMD ["gunicorn", "--bind", "0.0.0.0:8080", "server:app"]
