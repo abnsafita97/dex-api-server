@@ -1,22 +1,25 @@
-# Use an official Python image
+# Use official Python image
 FROM python:3.11-slim
+
+# Install Java (OpenJDK 17)
+RUN apt-get update && apt-get install -y openjdk-17-jre && apt-get clean
 
 # Set working directory
 WORKDIR /app
 
-# Install dependencies
+# Install Python dependencies
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy the rest of the application
 COPY . .
 
-# Copy baksmali and smali jars to a known location
+# Copy smali tools
 COPY baksmali.jar /usr/local/bin/baksmali.jar
 COPY smali.jar /usr/local/bin/smali.jar
 
-# Expose the port
+# Expose port
 EXPOSE 8080
 
-# Use gunicorn to run the Flask app
+# Run the app with gunicorn
 CMD ["gunicorn", "--bind", "0.0.0.0:8080", "server:app"]
