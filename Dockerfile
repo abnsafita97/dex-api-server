@@ -1,7 +1,7 @@
 # استخدم صورة Python الرسمية مع Bullseye
 FROM python:3.11-slim-bullseye
 
-# تثبيت تبعيات النظام (OpenJDK 17 بدلاً من default-jre)
+# تثبيت تبعيات النظام
 RUN apt-get update && apt-get install -y \
     openjdk-17-jre-headless \
     unzip \
@@ -27,9 +27,12 @@ COPY baksmali.jar /usr/local/bin/baksmali.jar
 COPY smali.jar /usr/local/bin/smali.jar
 
 # التحقق من وجود ملفات JAR
-RUN ls -la /usr/local/bin
 RUN chmod +x /usr/local/bin/baksmali.jar
 RUN chmod +x /usr/local/bin/smali.jar
+
+# نسخ سكريبت البدء
+COPY start.sh /app/start.sh
+RUN chmod +x /app/start.sh
 
 # تهيئة مجلد التحميلات مع أذونات صحيحة
 RUN mkdir -p /tmp && chmod 777 /tmp
@@ -37,5 +40,5 @@ RUN mkdir -p /tmp && chmod 777 /tmp
 # كشف البورت الذي يستخدمه Railway
 EXPOSE 8080
 
-# تشغيل التطبيق باستخدام gunicorn مع إعدادات المهلة والأداء
-CMD ["sh", "-c", "gunicorn --bind 0.0.0.0:${PORT:-8080} --timeout 600 --workers 1 --worker-class sync --access-logfile - --error-logfile - server:app"]
+# تشغيل سكريبت البدء
+CMD ["/app/start.sh"]
