@@ -1,21 +1,27 @@
-FROM openjdk:17-slim
+# استخدم صورة أساسية تحتوي على Python و JDK
+FROM python:3.9-slim-bullseye
 
-# تثبيت تبعيات النظام
+# تثبيت JDK وأدوات النظام
 RUN apt-get update && apt-get install -y \
-    python3 python3-pip python3-venv gcc unzip wget curl \
+    openjdk-17-jre-headless \
+    wget \
     && rm -rf /var/lib/apt/lists/*
 
-# إنشاء مجلد العمل
+# نسخ الملفات
 WORKDIR /app
-
-# نسخ ملفات متطلبات بايثون أولاً
-COPY requirements.txt .
-
-# تثبيت تبعيات بايثون
-RUN pip install --no-cache-dir -r requirements.txt
-
-# نسخ ملفات المشروع
 COPY . .
 
-# الأمر التشغيلي
-CMD ["gunicorn", "--bind", "0.0.0.0:$PORT", "--access-logfile", "-", "--error-logfile", "-", "server:app"]
+# تثبيت تبعيات Python مباشرة (بدون venv)
+RUN pip install --no-cache-dir -r requirements.txt
+
+# تنزيل smali/baksmali إذا لم تكن موجودة
+RUN if [ ! -f baksmali.jar ]; then \
+        wget -q https://github.com/JesusFreke/smali/releases/download/v2.5.2/baksmali-2.5.2.jar -O baksmali.jar; \
+    fi
+
+RUN if [ ! -f smali.jar ]; then \
+        wget -q https://github.com/JesusFreke/smali/releases/download/v2.5.2/smali-2.5.2.jar -O smali.jar; \
+    fi
+
+# الأمر التشغيلي المعدل (بدون تفعيل venv)
+CMD ["gunicorn", "--bind", "0.0.0.0:${PORT}", "--timeout", "300", "--workers", "1", "--access-logfile", "-", "--error-logfile", "-", "server:app"]
