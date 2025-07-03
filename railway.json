@@ -1,8 +1,5 @@
 {
   "build": {
     "builder": "DOCKERFILE"
-  },
-  "deploy": {
-    "startCommand": "sh -c \". /opt/venv/bin/activate && gunicorn -w 2 -b 0.0.0.0:$PORT server:app\""
   }
 }
