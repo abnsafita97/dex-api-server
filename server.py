@@ -9,10 +9,11 @@ import traceback
 from datetime import datetime
 import threading
 import time
+import psutil  # إضافة استيراد psutil
 
 # ===== إعداد نظام التسجيل =====
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.DEBUG,  # تغيير إلى DEBUG للحصول على تفاصيل أكثر
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[logging.StreamHandler()]
 )
@@ -42,7 +43,7 @@ def delayed_cleanup(directory, delay=30):
                 logger.warning(f"Directory not found for cleanup: {directory}")
         except Exception as e:
             logger.error(f"Cleanup failed for {directory}: {str(e)}")
-    
+
     thread = threading.Thread(target=cleanup)
     thread.daemon = True
     thread.start()
@@ -59,14 +60,14 @@ logger.info("Smali exists: %s", os.path.exists(SMALI_PATH))
 # ===== تسجيل الطلبات والاستجابات =====
 @app.before_request
 def log_request_info():
-    logger.info("Request: %s %s", request.method, request.url)
-    logger.info("Headers: %s", dict(request.headers))
+    logger.debug("Request: %s %s", request.method, request.url)
+    logger.debug("Headers: %s", dict(request.headers))
     if request.files:
-        logger.info("Files received: %s", list(request.files.keys()))
+        logger.debug("Files received: %s", list(request.files.keys()))
 
 @app.after_request
 def log_response_info(response):
-    logger.info("Response status: %s", response.status)
+    logger.debug("Response status: %s", response.status)
     return response
 
 # ===== نقطة البداية =====
@@ -157,7 +158,7 @@ def upload_apk():
             if file_count == 0:
                 logger.error("No smali files generated in output directory")
                 return jsonify(error="No smali files generated"), 500
-                
+
             # ضغط النتيجة
             zip_path = os.path.join(job_dir, "smali_out.zip")
             logger.info("Creating ZIP archive at: %s", zip_path)
@@ -186,15 +187,15 @@ def upload_apk():
                 download_name="smali_out.zip",
                 mimetype='application/zip'
             )
-            
+
             # إضافة رؤوس للتحكم في التخزين المؤقت
             response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
             response.headers["Pragma"] = "no-cache"
             response.headers["Expires"] = "0"
-            
+
             # تنظيف المجلد بعد تأخير
             delayed_cleanup(job_dir)
-            
+
             return response
 
         except zipfile.BadZipFile:
@@ -257,7 +258,7 @@ def assemble_smali():
                 return jsonify(error=f"DEX assembly failed: {result.stderr}"), 500
 
             logger.info("Smali assembly succeeded")
-            
+
             # إرسال الملف
             response = send_file(
                 dex_output,
@@ -265,10 +266,10 @@ def assemble_smali():
                 download_name="classes.dex",
                 mimetype='application/octet-stream'
             )
-            
+
             # تنظيف المجلد بعد تأخير
             delayed_cleanup(job_dir)
-            
+
             return response
 
         except Exception as e:
@@ -279,42 +280,77 @@ def assemble_smali():
         logger.error("Unhandled error in assemble_smali: %s", traceback.format_exc())
         return jsonify(error="Internal server error"), 500
 
-# ===== فحص صحة الخادم =====
+# ===== فحص صحة الخادم (مبسط) =====
 @app.route("/health", methods=["GET"])
 def health_check():
     try:
-        jar_checks = {
-            "baksmali": {
-                "path": BAKSMALI_PATH,
-                "exists": os.path.exists(BAKSMALI_PATH),
-                "size": os.path.getsize(BAKSMALI_PATH) if os.path.exists(BAKSMALI_PATH) else 0
-            },
-            "smali": {
-                "path": SMALI_PATH,
-                "exists": os.path.exists(SMALI_PATH),
-                "size": os.path.getsize(SMALI_PATH) if os.path.exists(SMALI_PATH) else 0
-            }
-        }
-
-        # الحصول على إصدار جافا
-        java_version = subprocess.check_output(
-            ["java", "-version"],
-            stderr=subprocess.STDOUT,
-            text=True
-        )
-
+        # إرجاع فحص صحة مبسط دون استدعاء java -version
         return jsonify({
             "status": "OK",
             "server_time": datetime.utcnow().isoformat(),
-            "java_version": java_version,
-            "jar_files": jar_checks,
-            "base_dir_files": os.listdir(BASE_DIR)
+            "message": "Basic health check passed"
         })
     except Exception as e:
         return jsonify({
             "status": "ERROR",
             "error": str(e),
             "traceback": traceback.format_exc()
+        }), 500
+
+# ===== فحص جافا =====
+@app.route("/javacheck", methods=["GET"])
+def java_check():
+    try:
+        # محاولة الحصول على إصدار جافا
+        result = subprocess.run(
+            ["java", "-version"],
+            stderr=subprocess.PIPE,  # java -version يكتب إلى stderr
+            stdout=subprocess.PIPE,
+            text=True,
+            timeout=5
+        )
+        # الجمع بين stdout و stderr
+        output = result.stdout + result.stderr
+        return jsonify({
+            "status": "OK",
+            "java_version": output.strip()
+        })
+    except subprocess.TimeoutExpired:
+        return jsonify({
+            "status": "ERROR",
+            "error": "Java check timed out"
+        }), 500
+    except Exception as e:
+        return jsonify({
+            "status": "ERROR",
+            "error": str(e),
+            "traceback": traceback.format_exc()
+        }), 500
+
+# ===== فحص الموارد =====
+@app.route("/resources", methods=["GET"])
+def resource_check():
+    try:
+        mem = psutil.virtual_memory()
+        disk = psutil.disk_usage('/')
+        return jsonify({
+            "memory": {
+                "total": mem.total,
+                "available": mem.available,
+                "used": mem.used,
+                "percent": mem.percent
+            },
+            "disk": {
+                "total": disk.total,
+                "used": disk.used,
+                "free": disk.free,
+                "percent": disk.percent
+            }
+        })
+    except Exception as e:
+        return jsonify({
+            "status": "ERROR",
+            "error": str(e)
         }), 500
 
 # ===== نقطة فحص الملفات المؤقتة =====
@@ -335,7 +371,7 @@ def list_temp_files():
                     "created": os.path.getctime(path),
                     "modified": os.path.getmtime(path)
                 })
-        
+
         return jsonify({
             "status": "OK",
             "temp_dir": UPLOAD_DIR,
