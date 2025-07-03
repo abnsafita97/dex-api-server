@@ -1,1 +1,1 @@
-web: gunicorn --bind 0.0.0.0:$PORT --timeout 600 --workers 2 --worker-class gthread --threads 4 --access-logfile - --error-logfile - server:app
+web: gunicorn --bind 0.0.0.0:$PORT --timeout 600 --workers 1 --worker-class sync --access-logfile - --error-logfile - server:app
