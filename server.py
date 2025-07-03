@@ -7,6 +7,8 @@ import zipfile
 import logging
 import traceback
 from datetime import datetime
+import threading
+import time
 
 # ===== إعداد نظام التسجيل =====
 logging.basicConfig(
@@ -26,6 +28,24 @@ app.config['MAX_CONTENT_LENGTH'] = MAX_CONTENT_LENGTH
 BAKSMALI_PATH = "/usr/local/bin/baksmali.jar"
 SMALI_PATH = "/usr/local/bin/smali.jar"
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+# ===== وظيفة لتنظيف المجلدات المؤقتة بعد التأخير =====
+def delayed_cleanup(directory, delay=30):
+    def cleanup():
+        logger.info(f"Waiting {delay} seconds before cleaning {directory}")
+        time.sleep(delay)
+        try:
+            if os.path.exists(directory):
+                shutil.rmtree(directory, ignore_errors=True)
+                logger.info(f"Cleaned up directory: {directory}")
+            else:
+                logger.warning(f"Directory not found for cleanup: {directory}")
+        except Exception as e:
+            logger.error(f"Cleanup failed for {directory}: {str(e)}")
+    
+    thread = threading.Thread(target=cleanup)
+    thread.daemon = True
+    thread.start()
 
 # ===== تسجيل معلومات البداية =====
 logger.info("Starting server with configuration:")
@@ -132,11 +152,18 @@ def upload_apk():
                     logger.error("Baksmali timed out for %s", dex_path)
                     return jsonify(error="DEX disassembly timed out"), 500
 
+            # التحقق من وجود ملفات في مجلد الإخراج
+            file_count = sum([len(files) for _, _, files in os.walk(out_dir)])
+            if file_count == 0:
+                logger.error("No smali files generated in output directory")
+                return jsonify(error="No smali files generated"), 500
+                
             # ضغط النتيجة
             zip_path = os.path.join(job_dir, "smali_out.zip")
             logger.info("Creating ZIP archive at: %s", zip_path)
 
-            with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+            # استخدم ZIP_STORED لتجنب مشاكل الضغط مع الملفات الكبيرة
+            with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_STORED) as zipf:
                 for root, dirs, files in os.walk(out_dir):
                     for file in files:
                         file_path = os.path.join(root, file)
@@ -144,15 +171,31 @@ def upload_apk():
                         zipf.write(file_path, arcname)
                         logger.debug("Added to ZIP: %s as %s", file_path, arcname)
 
-            logger.info("ZIP created successfully, size: %d bytes", os.path.getsize(zip_path))
+            # التحقق من أن ملف ZIP غير فارغ
+            zip_size = os.path.getsize(zip_path)
+            if zip_size < 1024:  # أقل من 1KB
+                logger.error("ZIP file too small: %d bytes", zip_size)
+                return jsonify(error="Empty ZIP file created"), 500
 
-            # إرسال الملف
-            return send_file(
+            logger.info("ZIP created successfully, size: %d bytes", zip_size)
+
+            # إرسال الملف مع رؤوس HTTP محسنة
+            response = send_file(
                 zip_path,
                 as_attachment=True,
                 download_name="smali_out.zip",
                 mimetype='application/zip'
             )
+            
+            # إضافة رؤوس للتحكم في التخزين المؤقت
+            response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
+            response.headers["Pragma"] = "no-cache"
+            response.headers["Expires"] = "0"
+            
+            # تنظيف المجلد بعد تأخير
+            delayed_cleanup(job_dir)
+            
+            return response
 
         except zipfile.BadZipFile:
             logger.exception("Invalid APK file")
@@ -160,8 +203,6 @@ def upload_apk():
         except Exception as e:
             logger.exception("APK processing error")
             return jsonify(error=f"Internal server error: {str(e)}"), 500
-        finally:
-            shutil.rmtree(job_dir, ignore_errors=True)
 
     except Exception as e:
         logger.error("Unhandled error in upload_apk: %s", traceback.format_exc())
@@ -216,17 +257,23 @@ def assemble_smali():
                 return jsonify(error=f"DEX assembly failed: {result.stderr}"), 500
 
             logger.info("Smali assembly succeeded")
-            return send_file(
+            
+            # إرسال الملف
+            response = send_file(
                 dex_output,
                 as_attachment=True,
                 download_name="classes.dex",
                 mimetype='application/octet-stream'
             )
+            
+            # تنظيف المجلد بعد تأخير
+            delayed_cleanup(job_dir)
+            
+            return response
+
         except Exception as e:
             logger.exception("Assembly error")
             return jsonify(error=f"Internal server error: {str(e)}"), 500
-        finally:
-            shutil.rmtree(job_dir, ignore_errors=True)
 
     except Exception as e:
         logger.error("Unhandled error in assemble_smali: %s", traceback.format_exc())
@@ -268,6 +315,36 @@ def health_check():
             "status": "ERROR",
             "error": str(e),
             "traceback": traceback.format_exc()
+        }), 500
+
+# ===== نقطة فحص الملفات المؤقتة =====
+@app.route("/tempfiles", methods=["GET"])
+def list_temp_files():
+    try:
+        temp_files = []
+        for f in os.listdir(UPLOAD_DIR):
+            if f.startswith("apkjob_") or f.startswith("assemblejob_"):
+                path = os.path.join(UPLOAD_DIR, f)
+                size = os.path.getsize(path) if os.path.isfile(path) else 0
+                is_dir = os.path.isdir(path)
+                temp_files.append({
+                    "name": f,
+                    "path": path,
+                    "size": size,
+                    "is_dir": is_dir,
+                    "created": os.path.getctime(path),
+                    "modified": os.path.getmtime(path)
+                })
+        
+        return jsonify({
+            "status": "OK",
+            "temp_dir": UPLOAD_DIR,
+            "files": temp_files
+        })
+    except Exception as e:
+        return jsonify({
+            "status": "ERROR",
+            "error": str(e)
         }), 500
 
 # ===== نقطة الدخول للتشغيل المحلي =====
